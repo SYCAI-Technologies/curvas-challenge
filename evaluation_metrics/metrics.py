@@ -113,18 +113,17 @@ def heaviside(x):
     return 0.5 * (np.sign(x) + 1)
 
 
-def crps_computation(predicted_volume, cdf, mean, std_dev, logging=False):
+def crps_computation(predicted_volume, cdf, mean, std_dev):
     """
     Calculates the Continuous Ranked Probability Score (CRPS) for each volume class,
     by using the ground truths to create a probabilistic distribution that keeps the
     multirater information of having multiple annotations. 
     
-    groundtruth: numpy stack list containing the three ground truths [gt1, gt2, gt3]
-                 each gt has the following values: 1: pancreas, 2: kidney, 3: liver
-                    (3, slices, X, Y)
-    prob_pred: probability prediction matrix, shape: (3, slices, X, Y), the three being
-                a probability matrix per each class
-    pixdim: vaue of the resampling needed, 1 by default
+    predicted_volume: scalar value representing the volume obtained from the 
+                        probabilistic prediction
+    cdf: cumulative density distribution (CDF) of the groundtruth volumes
+    mean: mean of the gaussian distribution obtained from the three groundtruth volumes
+    std_dev: std_dev of the gaussian distribution obtained from the three groundtruth volumes
      
     @output crps_dict
     """
@@ -136,18 +135,11 @@ def crps_computation(predicted_volume, cdf, mean, std_dev, logging=False):
     upper_limit = mean + 3 * std_dev
     
     crps_value, _ = quad(integrand, lower_limit, upper_limit)
-    
-    if logging:
-        # Debug information
-        print(f"Predicted Volume: {predicted_volume}")
-        print(f"CRPS Value: {crps_value}")
-        print(f"CDF at predicted volume: {cdf(predicted_volume)}")
-        print(f"Integral range: {lower_limit} to {upper_limit}")
-    
+        
     return crps_value
 
 
-def calculate_volumes_distributions(groundtruth, pixdim=1, logging=False):
+def calculate_volumes_distributions(groundtruth, pixdim=1):
     """
     Calculates the Cumulative Distribution Function (CDF) of the Probabilistic Function Distribution (PDF)
     obtained by calcuating the mean and the variance of considering the three annotations.
@@ -171,12 +163,6 @@ def calculate_volumes_distributions(groundtruth, pixdim=1, logging=False):
         volumes[organ_name] = [np.unique(gt, return_counts=True)[1][organ_val] * np.prod(pixdim) for gt in groundtruth]
         mean_gauss[organ_name] = np.mean(volumes[organ_name])
         var_gauss[organ_name] = np.std(volumes[organ_name])
-
-    if logging:
-        # Debug information
-        print(f"volumes: {volumes}")
-        print(f"mean_gauss: {mean_gauss}")
-        print(f"var_gauss: {var_gauss}")
 
     # Create normal distribution objects
     gaussian_dists = {organ_name: norm(loc=mean_gauss[organ_name], scale=var_gauss[organ_name]) for organ_name in organs.values()}
@@ -235,7 +221,7 @@ def multirater_expected_calibration_error(annotations_list, prob_pred):
 def expected_calibration_error(groundtruth, prob_pred, M=5):
     """
     Computes the Expected Calibration Error (ECE) between the given annotation and the 
-    probabilistic prediction.ñ
+    probabilistic prediction
     
     groundtruth: groundtruth matrix containing the following values: 1: pancreas, 2: kidney, 3: liver
                     shape: (slices, X, Y)
