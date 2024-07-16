@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d
 '''
 Dice Score Evaluation
 '''
-    
+
 def consensus_dice_score(groundtruth, bin_pred, prob_pred):
     """
     Computes an average of dice score for consensus areas only.
@@ -23,10 +23,11 @@ def consensus_dice_score(groundtruth, bin_pred, prob_pred):
                 a probability matrix per each class
      
     @output dice_scores, confidence
+  
     """
     
     # Transform probability predictions to one-hot encoding by taking the argmax
-    prediction_onehot = AsDiscrete(to_onehot=4)(np.expand_dims(bin_pred, axis=0))[1:]
+    prediction_onehot = AsDiscrete(to_onehot=4)(torch.from_numpy(np.expand_dims(bin_pred, axis=0)))[1:].astype(np.uint8)
     
     # Split ground truth into separate organs and calculate consensus
     organs =  {1: 'panc', 2: 'kidn', 3: 'livr'}
@@ -35,33 +36,40 @@ def consensus_dice_score(groundtruth, bin_pred, prob_pred):
 
     for organ_val, organ_name in organs.items():
         # Get the ground truth for the current organ
-        organ_gt = (groundtruth == organ_val).astype(int)
-        organ_bck = (groundtruth != organ_val).astype(int)
+        organ_gt = (groundtruth == organ_val).astype(np.uint8)
+        organ_bck = (groundtruth != organ_val).astype(np.uint8)
         
         # Calculate consensus regions (all annotators agree)
-        consensus[organ_name] = np.logical_and.reduce(organ_gt, axis=0).astype(int)
-        consensus[f"{organ_name}_bck"] = np.logical_and.reduce(organ_bck, axis=0).astype(int)
+        consensus[organ_name] = np.logical_and.reduce(organ_gt, axis=0).astype(np.uint8)
+        consensus[f"{organ_name}_bck"] = np.logical_and.reduce(organ_bck, axis=0).astype(np.uint8)
         
         # Calculate dissensus regions (where both background and foreground are 0)
-        dissensus[organ_name] = np.logical_and(consensus[organ_name] == 0, consensus[f"{organ_name}_bck"] == 0).astype(int)
+        dissensus[organ_name] = np.logical_and(consensus[organ_name] == 0, 
+                                               consensus[f"{organ_name}_bck"]== 0).astype(np.uint8)
     
     # Mask the predictions and ground truth with the consensus areas
     predictions = {}
     groundtruth_consensus = {}
-    mean_probs = {}
     confidence = {}
 
-    for organ_val, organ_name in organs.items():    
+    for organ_val, organ_name in organs.items():
         # Apply the dissensus mask to exclude non-consensus areas
         filtered_prediction = prediction_onehot[organ_val-1] * (1 - dissensus[organ_name])
+        #print('filtered_prediction: '+str(np.unique(filtered_prediction, return_counts=True)))
         filtered_groundtruth = consensus[organ_name] * (1 - dissensus[organ_name])
+        #print('filtered_groundtruth: '+str(np.unique(filtered_groundtruth, return_counts=True)))
         
         predictions[organ_name] = filtered_prediction
+        #print('predictions[organ_name]: '+str(np.unique(predictions[organ_name], return_counts=True)))
         groundtruth_consensus[organ_name] = filtered_groundtruth
+        #print('groundtruth_consensus[organ_name]: '+str(np.unique(groundtruth_consensus[organ_name], return_counts=True)))
         
         # Compute mean probabilities and confidence in the consensus area
-        prob_in_consensus = prob_pred[organ_val-1] * consensus[organ_name]
-        confidence[organ_name] = np.max(prob_in_consensus[consensus[organ_name] == 1])
+        prob_in_consensus_organ = prob_pred[organ_val-1] * np.where(consensus[organ_name]==1, 1, np.nan)
+        prob_in_consensus_bck = prob_pred[organ_val-1] * np.where(consensus[f"{organ_name}_bck"]==1, 1, np.nan)
+        mean_conf_organ = np.nanmean(prob_in_consensus_organ)
+        mean_conf_bck = np.nanmean(prob_in_consensus_bck)        
+        confidence[organ_name] = (((1-mean_conf_bck)+mean_conf_organ)/2)
     
     # Create DiceMetric instance
     dice_metric = DiceMetric(include_background=False, reduction="mean", get_not_nans=False, ignore_empty=True)
@@ -75,7 +83,7 @@ def consensus_dice_score(groundtruth, bin_pred, prob_pred):
         dice_scores[organ_name] = dice_metric.aggregate().item()
     
     return dice_scores, confidence
-
+    
 
 '''
 Volume Assessment
@@ -216,47 +224,41 @@ def multirater_expected_calibration_error(annotations_list, prob_pred):
         ece_dict[e] = expected_calibration_error(annotations_list[e], prob_pred)
         
     return ece_dict
-    
-    
-def expected_calibration_error(groundtruth, prob_pred, M=5):
+
+
+def expected_calibration_error(groundtruth, prob_pred_onehot, num_classes=4, n_bins=50):
     """
     Computes the Expected Calibration Error (ECE) between the given annotation and the 
     probabilistic prediction
     
     groundtruth: groundtruth matrix containing the following values: 1: pancreas, 2: kidney, 3: liver
                     shape: (slices, X, Y)
-    prob_pred: probability prediction matrix, shape: (3, slices, X, Y), the three being
-                a probability matrix per each class
-     
+    prob_pred_onehot: probability prediction matrix, shape: (3, slices, X, Y), the three being
+                    a probability matrix per each class
+    num_classes: number of classes
+    n_bins: number of bins                    
+                    
     @output ece
     """ 
     
-    all_groundtruth = torch.from_numpy(groundtruth)
-    all_samples = torch.from_numpy(prob_pred)
+    # Convert inputs to torch tensors
+    all_groundtruth = torch.tensor(groundtruth)
+    all_samples = torch.tensor(prob_pred_onehot)
     
-    # uniform binning approach with M number of bins
-    bin_boundaries = torch.linspace(0, 1, M + 1)
-    bin_lowers = bin_boundaries[:-1]
-    bin_uppers = bin_boundaries[1:]
+    # Calculate the probability for the background class
+    background_prob = 1 - all_samples.sum(dim=0, keepdim=True)
+    
+    # Combine background probabilities with the provided probabilities
+    all_samples_with_bg = torch.cat((background_prob, all_samples), dim=0)
+    
+    # Flatten the tensors to (num_samples, num_classes) and (num_samples,)
+    all_groundtruth_flat = all_groundtruth.view(-1)
+    all_samples_flat = all_samples_with_bg.permute(1, 2, 3, 0).reshape(-1, num_classes)
+    
+    # Initialize the calibration error metric
+    calibration_error = MulticlassCalibrationError(num_classes=num_classes, n_bins=n_bins)
 
-    # get max probability per sample i (confidences) and the final predictions from these confidences
-    confidences, predicted_label = torch.max(all_samples, 0)
-
-    # get a boolean list of correct/false predictions
-    accuracies = predicted_label.eq(all_groundtruth)
-
-    ece = torch.zeros(1)
-    for bin_lower, bin_upper in zip(bin_lowers, bin_uppers):
-        # determine if sample is in bin m (between bin lower & upper)
-        in_bin = confidences.gt(bin_lower.item()) * confidences.le(bin_upper.item())
-        # can calculate the empirical probability of a sample falling into bin m: (|Bm|/n)
-        prop_in_bin = in_bin.float().mean()
-        if prop_in_bin.item() > 0:
-            # get the accuracy of bin m: acc(Bm)
-            accuracy_in_bin = accuracies[in_bin].float().mean()
-            # get the average confidence of bin m: conf(Bm)
-            avg_confidence_in_bin = confidences[in_bin].mean()
-            # calculate |acc(Bm) - conf(Bm)| * (|Bm|/n) for bin m and add to the total ECE
-            ece += torch.abs(avg_confidence_in_bin - accuracy_in_bin) * prop_in_bin
-
+    # Calculate the ECE
+    ece = calibration_error(all_samples_flat, all_groundtruth_flat).cpu().detach().numpy().astype(np.float64)
+    
     return ece
