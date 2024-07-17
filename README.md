@@ -7,8 +7,16 @@ This software is protected by a Creative Commons Attribution-NonCommercial-Share
 Official code repository for the challenge CURVAS: Calibration and Uncertainty for multiRater Volume Assessment in multiorgan Segmentation. 
 Visit our website (https://www.sycaimedical.com/challenge) or participate in the challenge (https://curvas.grand-challenge.org/curvas/)!
 
-Find the training set a the Zenodo repository: https://zenodo.org/records/11147560 
+Find the training set a the Zenodo repository: https://zenodo.org/records/12687192
 
 If you want to use our dataset in your work, please cite us:
 
     Riera-Marín, M., Kleiß, J.-M., Aubanell, A., & Antolín, A. (2024). CURVAS dataset [Data set]. MEDICAL IMAGE COMPUTING AND COMPUTER ASSISTED INTERVENTION (MICCAI), Marrakesch. Zenodo. https://doi.org/10.5281/zenodo.11147560
+
+## Repository structure
+
+This repository is organized in the following way:
+
+1. The folder baseline_model contains the baseline model uploaded to the Grand Challenge website and some files, such as Dockerfile, that can be useful for uploading your own dockers.
+
+2. The folder evaluation_metrics contain the metrics used for the evaluation of the challenge, so they can be used to test you results before being updated.
