@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from glob import glob
+import time
+import threading
 import SimpleITK as sitk
 import numpy as np
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
@@ -9,49 +11,44 @@ import torch
 INPUT_PATH = Path("/input")
 OUTPUT_PATH = Path("/output")
 RESOURCE_PATH = Path("resources")
-    
+
 
 def run():
-        
-    # Read the input
+
     input_thoracic_abdominal_ct_image, input_metadata = load_image_file_as_array(
         location=INPUT_PATH / "images/thoracic-abdominal-ct",
     )
+    
+    _show_torch_cuda_info()
+    
+    start_time = time.time()
         
-    # Make the predictions
     output_abdominal_organ_segmentation, output_pancreas_confidence, output_kidney_confidence, output_liver_confidence = perform_inference(
         input_image=input_thoracic_abdominal_ct_image, input_metadata=input_metadata
     )
-
-    # Save the output
-    write_array_as_image_file(
-        location=OUTPUT_PATH / "images/abdominal-organ-segmentation",
-        array=output_abdominal_organ_segmentation,
-    )
-    write_array_as_image_file(
-        location=OUTPUT_PATH / "images/kidney-confidence",
-        array=output_kidney_confidence,
-    )
-    write_array_as_image_file(
-        location=OUTPUT_PATH / "images/pancreas-confidence",
-        array=output_pancreas_confidence,
-    )
-    write_array_as_image_file(
-        location=OUTPUT_PATH / "images/liver-confidence",
-        array=output_liver_confidence,
-    )
+    
+    prediction_time = np.round((time.time() - start_time)/60, 2)
+    print('Prediction time: '+str(prediction_time))
+    
+    print('Saving the predictions')
+    
+    start_time = time.time()
+    
+    write_files_in_parallel([(Path(OUTPUT_PATH / "images/abdominal-organ-segmentation"), output_abdominal_organ_segmentation),
+                             (Path(OUTPUT_PATH / "images/kidney-confidence"), output_kidney_confidence),
+                             (Path(OUTPUT_PATH / "images/pancreas-confidence"), output_pancreas_confidence),
+                             (Path(OUTPUT_PATH / "images/liver-confidence"), output_liver_confidence)
+                             ])
+    
+    saving_time = np.round((time.time() - start_time)/60, 2)
+    print('Saving time: '+str(saving_time))
+    
+    print('Finished running algorithm!')
     
     return 0
 
 
-def perform_inference(input_image, input_metadata):
-    # Save the input image temporarily to use with nnU-Net
-    temp_output_path = OUTPUT_PATH / "temp_output"
-    temp_output_path.mkdir(parents=True, exist_ok=True)
-    temp_input_path = OUTPUT_PATH / "temp_input_image.nii.gz"
-
-    sitk.WriteImage(sitk.GetImageFromArray(input_image), str(temp_input_path))
-    
+def perform_inference(input_image, input_metadata):    
     # Define nnUNet v2 model parameters
     model_name = '3d_fullres'
     trainer_class_name = 'nnUNetTrainer'
@@ -78,41 +75,29 @@ def perform_inference(input_image, input_metadata):
             use_folds=("0"),
             checkpoint_name="checkpoint_best.pth",
     )
-
-    # Perform prediction
-    predictor.predict_from_files(
-                    list_of_lists_or_source_folder=[[str(temp_input_path)]],
-                    output_folder_or_list_of_truncated_output_files=[str(temp_output_path)],
-                    overwrite=True,
-                    save_probabilities=True,
-                    num_processes_preprocessing=6, 
-                    num_processes_segmentation_export=6,
-                    num_parts=6#, part_id=0
-                )
     
-    # Load the nnUNet output
-    output_file_path = OUTPUT_PATH / "temp_output.nii.gz"
-    output_segmentation = sitk.GetArrayFromImage(sitk.ReadImage(str(output_file_path)))
-    
-    output_file_path_probs = OUTPUT_PATH / "temp_output.npz"
-    probabilities = np.load(output_file_path_probs, allow_pickle=False)['probabilities'] # (4, 512, 512, slices)
+    input_metadata = [input_metadata[i] for i in [2,0,1]]
 
-    return output_segmentation.astype(np.uint8), probabilities[1],  probabilities[2], probabilities[3]
+    output_segmentation, probabilities = predictor.predict_single_npy_array(input_image=np.expand_dims(input_image, axis=0), 
+                                                                            image_properties={'spacing':input_metadata},
+                                                                            segmentation_previous_stage=None, 
+                                                                            output_file_truncated=None, 
+                                                                            save_or_return_probabilities=True
+                                                                            )
+    
+    return output_segmentation, probabilities[1],  probabilities[2], probabilities[3]
 
 
 def load_image_file_as_array(*, location):
-    # Use SimpleITK to read a file
     input_files = glob(str(location / "*.tiff")) + glob(str(location / "*.mha"))
     result = sitk.ReadImage(input_files[0])
 
-    # Convert it to a Numpy array
     return sitk.GetArrayFromImage(result), result.GetSpacing()
 
 
 def write_array_as_image_file(*, location, array):
     location.mkdir(parents=True, exist_ok=True)
 
-    # You may need to change the suffix to .tiff to match the expected output
     suffix = ".mha"
 
     image = sitk.GetImageFromArray(array)
@@ -121,6 +106,32 @@ def write_array_as_image_file(*, location, array):
         location / f"output{suffix}",
         useCompression=True,
     )
+    
+
+def write_files_in_parallel(files_data):
+    threads = []
+    for location, array in files_data:
+        print('location: '+str(location))
+        thread = threading.Thread(target=write_array_as_image_file, kwargs={'location': location, 'array': array})
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+
+def _show_torch_cuda_info():
+    import torch
+
+    print("=+=" * 10)
+    print("Collecting Torch CUDA information")
+    print(f"Torch CUDA is available: {(available := torch.cuda.is_available())}")
+    if available:
+        print(f"\tnumber of devices: {torch.cuda.device_count()}")
+        print(f"\tcurrent device: { (current_device := torch.cuda.current_device())}")
+        print(f"\tproperties: {torch.cuda.get_device_properties(current_device)}")
+    print("=+=" * 10)
+
 
 
 if __name__ == "__main__":
