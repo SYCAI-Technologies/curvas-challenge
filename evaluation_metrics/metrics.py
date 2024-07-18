@@ -5,6 +5,48 @@ from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete
 from scipy.integrate import quad
 from scipy.interpolate import interp1d
+from monai.transforms import CropForeground
+
+from torchmetrics.classification import MulticlassCalibrationError
+
+
+'''
+Prepare the annotations and results to be processed
+'''
+
+def preprocess_results(ct_image, annotations, results):
+    """
+    Preprocess the images, predictions and annotations in order to be evaluated.
+    It crops the foreground and applies the same crop to the rest of matrices.
+    This is done to save some memory and work with smaller matrices.
+    
+    ct_image: CT images of shape (slices, X, Y)
+    annotations: list containing the three ground truths [gt1, gt2, gt3]
+                 each gt has the following values: 1: pancreas, 2: kidney, 3: liver
+                 each gt has the following shape (slices, X, Y)
+    results: list containing the results [binarized prediction, 
+                                          pancreas_confidence,
+                                          kidney_confidence,
+                                          liver_confidence
+                                         ]
+            the binarized prediction the following values: 1: pancreas, 2: kidney, 3: liver
+            each confidence has probabilistic values that range from 0 to 1
+     
+    @output cropped_annotations, cropped_results[0], cropped_results[1:]
+  
+    """
+    
+    # Define the CropForeground transform
+    cropper = CropForeground(select_fn=lambda x: x > 0)  # Assuming non-zero voxels are foreground
+
+    # Compute the cropping box based on the CT image
+    box_start, box_end = cropper.compute_bounding_box(ct_image)
+    
+    # Apply the cropping box to all annotations
+    cropped_annotations = [annotation[..., box_start[0]:box_end[0], box_start[1]:box_end[1]] for annotation in annotations]
+    cropped_results = [result[..., box_start[0]:box_end[0], box_start[1]:box_end[1]] for result in results]
+
+    return cropped_annotations, cropped_results[0], cropped_results[1:]
 
 
 '''
@@ -55,14 +97,10 @@ def consensus_dice_score(groundtruth, bin_pred, prob_pred):
     for organ_val, organ_name in organs.items():
         # Apply the dissensus mask to exclude non-consensus areas
         filtered_prediction = prediction_onehot[organ_val-1] * (1 - dissensus[organ_name])
-        #print('filtered_prediction: '+str(np.unique(filtered_prediction, return_counts=True)))
         filtered_groundtruth = consensus[organ_name] * (1 - dissensus[organ_name])
-        #print('filtered_groundtruth: '+str(np.unique(filtered_groundtruth, return_counts=True)))
         
         predictions[organ_name] = filtered_prediction
-        #print('predictions[organ_name]: '+str(np.unique(predictions[organ_name], return_counts=True)))
         groundtruth_consensus[organ_name] = filtered_groundtruth
-        #print('groundtruth_consensus[organ_name]: '+str(np.unique(groundtruth_consensus[organ_name], return_counts=True)))
         
         # Compute mean probabilities and confidence in the consensus area
         prob_in_consensus_organ = prob_pred[organ_val-1] * np.where(consensus[organ_name]==1, 1, np.nan)
@@ -76,8 +114,8 @@ def consensus_dice_score(groundtruth, bin_pred, prob_pred):
 
     dice_scores = {}
     for organ_name in organs.values():
-        gt = torch.from_numpy(groundtruth_consensus[organ_name])#[None, ...]
-        pred = torch.from_numpy(predictions[organ_name])#[None, ...]
+        gt = torch.from_numpy(groundtruth_consensus[organ_name])
+        pred = torch.from_numpy(predictions[organ_name])
         dice_metric.reset()
         dice_metric(pred, gt)
         dice_scores[organ_name] = dice_metric.aggregate().item()
@@ -89,7 +127,7 @@ def consensus_dice_score(groundtruth, bin_pred, prob_pred):
 Volume Assessment
 '''
 
-def volume_metric(groundtruth, prediction, pixdim=1):
+def volume_metric(groundtruth, prediction, voxel_proportion=1):
     """
     Calculates the Continuous Ranked Probability Score (CRPS) for each volume class,
     by using the ground truths to create a probabilistic distribution that keeps the
@@ -100,18 +138,18 @@ def volume_metric(groundtruth, prediction, pixdim=1):
                     (3, slices, X, Y)
     prob_pred: probability prediction matrix, shape: (3, slices, X, Y), the three being
                 a probability matrix per each class
-    pixdim: vaue of the resampling needed, 1 by default
+    voxel_proportion: vaue of the resampling needed voxel-wise, 1 by default
      
     @output crps_dict
     """
     
-    cdf_list = calculate_volumes_distributions(groundtruth, pixdim)
+    cdf_list = calculate_volumes_distributions(groundtruth, voxel_proportion)
         
     crps_dict = {}    
     organs =  {1: 'panc', 2: 'kidn', 3: 'livr'}
 
     for organ_val, organ_name in organs.items():
-        probabilistic_volume = compute_probabilistic_volume(prediction[organ_val-1])
+        probabilistic_volume = compute_probabilistic_volume(prediction[organ_val-1], voxel_proportion)
         crps_dict[organ_name] = crps_computation(probabilistic_volume, cdf_list[organ_name], mean_gauss[organ_name], var_gauss[organ_name])
 
     return crps_dict
@@ -147,7 +185,7 @@ def crps_computation(predicted_volume, cdf, mean, std_dev):
     return crps_value
 
 
-def calculate_volumes_distributions(groundtruth, pixdim=1):
+def calculate_volumes_distributions(groundtruth, voxel_proportion=1):
     """
     Calculates the Cumulative Distribution Function (CDF) of the Probabilistic Function Distribution (PDF)
     obtained by calcuating the mean and the variance of considering the three annotations.
@@ -155,7 +193,7 @@ def calculate_volumes_distributions(groundtruth, pixdim=1):
     groundtruth: numpy stack list containing the three ground truths [gt1, gt2, gt3]
                  each gt has the following values: 1: pancreas, 2: kidney, 3: liver
                     (3, slices, X, Y)
-    pixdim: vaue of the resampling needed, 1 by default            
+    voxel_proportion: vaue of the resampling needed voxel-wise, 1 by default
     
     @output cdfs_dict
     """
@@ -168,7 +206,7 @@ def calculate_volumes_distributions(groundtruth, pixdim=1):
     volumes = {}
 
     for organ_val, organ_name in organs.items():
-        volumes[organ_name] = [np.unique(gt, return_counts=True)[1][organ_val] * np.prod(pixdim) for gt in groundtruth]
+        volumes[organ_name] = [np.unique(gt, return_counts=True)[1][organ_val] * np.prod(voxel_proportion) for gt in groundtruth]
         mean_gauss[organ_name] = np.mean(volumes[organ_name])
         var_gauss[organ_name] = np.std(volumes[organ_name])
 
@@ -176,16 +214,16 @@ def calculate_volumes_distributions(groundtruth, pixdim=1):
     gaussian_dists = {organ_name: norm(loc=mean_gauss[organ_name], scale=var_gauss[organ_name]) for organ_name in organs.values()}
     
     # Generate CDFs
-    cdfs_dict = {}
+    cdfs = {}
     for organ_name in organs.values():
         x = np.linspace(gaussian_dists[organ_name].ppf(0.01), gaussian_dists[organ_name].ppf(0.99), 100)
         cdf_values = gaussian_dists[organ_name].cdf(x)
-        cdfs_dict[organ_name] = interp1d(x, cdf_values, bounds_error=False, fill_value=(0, 1))  # Create an interpolation function
+        cdfs[organ_name] = interp1d(x, cdf_values, bounds_error=False, fill_value=(0, 1))  # Create an interpolation function
 
-    return cdfs_dict
+    return cdfs
     
     
-def compute_probabilistic_volume(preds):
+def compute_probabilistic_volume(preds, voxel_proportion=1):
     """
     Computes the volume of the matrix given (either pancreas, kidney or liver)
     by adding up all the probabilities in this matrix. This way the uncertainty plays
@@ -193,6 +231,7 @@ def compute_probabilistic_volume(preds):
     volume should be close to the mean obtained by averaging the three annotations.
     
     preds: probabilistic matrix of a specific organ
+    voxel_proportion: vaue of the resampling needed voxel-wise, 1 by default
      
     @output volume
     """
@@ -200,7 +239,7 @@ def compute_probabilistic_volume(preds):
     # Sum the predicted probabilities to get the volume
     volume = preds.sum().item()
     
-    return volume
+    return volume*voxel_proportion
 
 
 '''
