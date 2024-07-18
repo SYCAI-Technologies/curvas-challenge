@@ -19,5 +19,5 @@ This repository is organized in the following way:
 
 1. The folder **baseline_model** contains the baseline model uploaded to the Grand Challenge website and some other files, such as the Dockerfile.
 
-2. The folder **evaluation_metrics** contains the metrics used for the evaluation of the challenge, so they can be used to test you results before being updated.
+2. The folder **evaluation_metrics** contains the metrics used for the evaluation of the challenge, so they can be used to test your results before being updated.
 
