@@ -17,18 +17,7 @@ If you want to use our dataset in your work, please cite us:
 
 This repository is organized in the following way:
 
-1. The folder **baseline_model** contains the baseline model uploaded to the Grand Challenge website and some files, such as Dockerfile, that can be useful for uploading your own dockers.
+1. The folder **baseline_model** contains the baseline model uploaded to the Grand Challenge website and some other files, such as the Dockerfile.
 
 2. The folder **evaluation_metrics** contains the metrics used for the evaluation of the challenge, so they can be used to test you results before being updated.
-
-
-
-
-_This work was supported by the Catalan Government inside the program ”Doctorats Industrials” and by the company Sycai Technologies SL. Mertixell Riera i Marín is supported by the industrial doctorate of the AGAUR 2021-063._
-
-![agaur](https://github.com/user-attachments/assets/2cf0d98c-83d7-4c3a-aa5f-97187d5c9a3a)
-
-_The challenge has been co-funded by Proyectos de Colaboración Público-Privada (CPP2021-008364), funded by MCIN/AEI, and the European Union through the NextGenerationEU/PRTR._
-
-![micin-financiadouenextgeneration-prtr-aei](https://github.com/user-attachments/assets/1772a658-961b-4829-89d8-23a52bf175ac)
 
