@@ -9,7 +9,7 @@ Visit our website (https://www.sycaimedical.com/challenge) or participate in the
 
 Find the training set a the Zenodo repository: https://zenodo.org/records/12687192
 
-Find out the winner method in : :mega::top: [MedIG]([https://github.com/pzhhhhh2263/MICCAI-Challenge-CURVAS2024])
+:mega::top: Check out the winner method in: [MedIG](https://github.com/pzhhhhh2263/MICCAI-Challenge-CURVAS2024)
 
 If you want to use our dataset in your work, please cite us:
 
