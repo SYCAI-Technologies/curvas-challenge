@@ -9,6 +9,8 @@ Visit our website (https://www.sycaimedical.com/challenge) or participate in the
 
 Find the training set a the Zenodo repository: https://zenodo.org/records/12687192
 
+Find out the winner method in : :mega::top: [MedIG]([https://github.com/pzhhhhh2263/MICCAI-Challenge-CURVAS2024])
+
 If you want to use our dataset in your work, please cite us:
 
     Riera-Marín, M., Kleiß, J.-M., Aubanell, A., & Antolín, A. (2024). CURVAS dataset [Data set]. MEDICAL IMAGE COMPUTING AND COMPUTER ASSISTED INTERVENTION (MICCAI), Marrakesch. Zenodo. https://doi.org/10.5281/zenodo.11147560
