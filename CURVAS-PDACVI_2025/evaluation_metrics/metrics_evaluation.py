@@ -3,6 +3,7 @@ import torch
 from scipy.stats import norm
 from scipy.integrate import quad
 from scipy.interpolate import interp1d
+from scipy.stats import wasserstein_distance
 from .vi_metrics import get_involvement
 
 from torchmetrics.classification import MulticlassCalibrationError
@@ -12,6 +13,49 @@ Vascular Involvement
 '''
 vascular_strucutres_dict = {'PORTA': 1, 'SMV': 2, 'AORTA': 3, 'CELIAC TRUNK': 4, 'SMA': 5}
 planes = ['cor', 'sag', 'ax']
+
+ 
+def aggregated_vascular_involvement(gt_distr: dict, pred_distr: dict) -> dict:
+    """
+    Compute the aggregated values of the Vascular Involvement (VI) for each structure
+
+    Parameters
+    ----------
+    gt_distr: dict
+        Dictionary of distributions.
+    pred_distr : dict
+        Dictionary of distributions.
+
+    Returns
+    -------
+    aggregated_metrics: dictionary
+        Dictionary of Wasserstein metrics for each vascular structure.
+    """
+
+    results = {}
+    aggregated_metrics = {structure: 0 for structure in vascular_strucutres_dict}
+
+    for vessel in vascular_strucutres_dict:
+        print(vessel)
+        results[vessel] = {}
+        for plane in ['cor', 'sag', 'ax']:
+            gt = gt_distr[vessel][plane]
+            pred = pred_distr[vessel][plane]
+            print(f'{plane}: gt {gt}, pred {pred}')
+            
+            x = np.linspace(0, 360, 1000)
+            p = gt.pdf(x)
+            q = pred.pdf(x)
+
+            if not np.all(np.isfinite(p)) or not np.all(np.isfinite(q)): results[vessel][plane] = np.nan
+            elif p.sum() <= 0 or q.sum() <= 0: results[vessel][plane] = np.nan
+            else: results[vessel][plane] = wasserstein_distance(x, x, p, q)
+
+        # Aggregate per metric
+        aggregated_metrics[vessel] = float(np.mean([results[vessel][plane] for plane in results[vessel]]))
+    
+    return aggregated_metrics
+
 
 def vascular_involvement(annotations: list, vi: np.array, soft_mask:np.array, smooth: float = 1e-6):
     """
@@ -88,7 +132,7 @@ def vascular_involvement(annotations: list, vi: np.array, soft_mask:np.array, sm
 Dice Score Evaluation
 '''
 
-def merged_dice_score(pred: np.ndarray, bin_pred: np.ndarray, annotations: list, smooth: float = 1e-6) -> float:
+def merged_dice_score(pred: np.ndarray, bin_pred: np.ndarray, annotations: list, smooth: float = 1e-6) -> tuple[float, float]:
     """
     Compute the soft Dice score between a soft prediction and the average of multiple binary annotations.
 
@@ -169,11 +213,11 @@ def volume_metric(annotations: list, prediction: np.ndarray, voxel_proportion: f
     """
     
     print('distr')
-    cdf_list = calculate_volumes_distributions(np.stack(annotations), voxel_proportion)
+    cdf = calculate_volumes_distributions(np.stack(annotations), voxel_proportion)
     print('vol')
     probabilistic_volume = compute_probabilistic_volume(prediction, voxel_proportion)
     print('crps')
-    crps = crps_computation(probabilistic_volume, cdf_list, mean_gauss, var_gauss)
+    crps = crps_computation(probabilistic_volume, cdf, mean_gauss, var_gauss)
 
     return float(crps)
 
@@ -182,7 +226,7 @@ def heaviside(x):
     return 0.5 * (np.sign(x) + 1)
 
 
-def crps_computation(predicted_volume: np.array, cdf, mean, std_dev):
+def crps_computation(predicted_volume: np.array, cdf: interp1d, mean: float, std_dev: float) -> float:
     """
     Calculates the Continuous Ranked Probability Score (CRPS) for each volume class,
     by using the ground truths to create a probabilistic distribution that keeps the
@@ -217,7 +261,7 @@ def crps_computation(predicted_volume: np.array, cdf, mean, std_dev):
     return crps_value
 
 
-def calculate_volumes_distributions(groundtruth: list, voxel_proportion: float=1):
+def calculate_volumes_distributions(groundtruth: list, voxel_proportion: float=1) -> interp1d:
     """
     Calculates the Cumulative Distribution Function (CDF) of the Probabilistic Function Distribution (PDF)
     obtained by calcuating the mean and the variance of considering the three annotations.
@@ -231,7 +275,7 @@ def calculate_volumes_distributions(groundtruth: list, voxel_proportion: float=1
     
     Returns
     -------
-    cdf: cdf
+    cdf: interp1d
         Cumulative Distribution function
     """
     
