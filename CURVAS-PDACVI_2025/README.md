@@ -1,6 +1,7 @@
 This software is protected by a Creative Commons Attribution-NonCommercial-ShareAlike (CC-BY-NC-SA) license which allows the use of the software for research activities but prevents its use for commercial purpose. This work and SYCAI TECHNOLOGIES SL shall be cited in any further work using this research. If you want to use this code, please contact us under info@sycaitechnologies.com
 
-![image_2 x15](https://github.com/SYCAI-Technologies/curvas-challenge/assets/78344468/c852351d-c705-436e-8cd6-8235698a2992)
+![image_2 x15](https://github.com/user-attachments/assets/5bdc9ad7-1fe7-4eae-beb2-516f66395af9)
+
 
 ## CURVAS Challenge
 
