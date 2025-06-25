@@ -47,21 +47,35 @@ def aggregated_vascular_involvement(gt_distr: dict, pred_distr: dict) -> dict:
             p = gt.pdf(x)
             q = pred.pdf(x)
 
+            mean_q = np.sum(x * q)
+            std_q = np.sqrt(np.sum(q * (x - mean_q) ** 2) / np.sum(q)) if np.sum(q) > 0 else 0
+
+            mean_p = np.sum(x * p) / np.sum(p)
+            std_p = np.sqrt(np.sum(p * (x - mean_p) ** 2) / np.sum(p)) if np.sum(p) > 0 else 0
+
             # === Fallback rules first ===
             if np.allclose(p, 0.0) and np.allclose(q, 0.0):
                 results[vessel][plane] = 0.0
             elif np.allclose(p, 0.0):
-                results[vessel][plane] = 1.0
+                if np.allclose(std_q, 0.0): 
+                    print('degenerate groundtruth')
+                    results[vessel][plane] = abs(mean_q - 0) #absolute difference between means
+                else: 
+                    results[vessel][plane] = 360 # maximum penalty for maximum disagreement
             elif np.allclose(q, 0.0):
-                results[vessel][plane] = 1.0
+                if np.allclose(std_p, 0.0): 
+                    print('degenerate prediction')
+                    results[vessel][plane] = abs(mean_p - 0) #absolute difference between means
+                else: 
+                    results[vessel][plane] = 360 # maximum penalty for maximum disagreement
             # === Else, sanitize and compute Wasserstein ===
             else:
                 p = np.nan_to_num(p, nan=0.0, neginf=0.0, posinf=0.0)
                 q = np.nan_to_num(q, nan=0.0, neginf=0.0, posinf=0.0)
                 p = np.clip(p, 0, None)
                 q = np.clip(q, 0, None)
-                if p.sum() > 0: p /= p.sum()
-                if q.sum() > 0: q /= q.sum()
+                p /= p.sum()
+                q /= q.sum()
                 results[vessel][plane] = wasserstein_distance(x, x, p, q)
 
         # Aggregate per metric
