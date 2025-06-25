@@ -47,9 +47,22 @@ def aggregated_vascular_involvement(gt_distr: dict, pred_distr: dict) -> dict:
             p = gt.pdf(x)
             q = pred.pdf(x)
 
-            if not np.all(np.isfinite(p)) or not np.all(np.isfinite(q)): results[vessel][plane] = np.nan
-            elif p.sum() <= 0 or q.sum() <= 0: results[vessel][plane] = np.nan
-            else: results[vessel][plane] = wasserstein_distance(x, x, p, q)
+            # === Fallback rules first ===
+            if np.allclose(p, 0.0) and np.allclose(q, 0.0):
+                results[vessel][plane] = 0.0
+            elif np.allclose(p, 0.0):
+                results[vessel][plane] = 1.0
+            elif np.allclose(q, 0.0):
+                results[vessel][plane] = 1.0
+            # === Else, sanitize and compute Wasserstein ===
+            else:
+                p = np.nan_to_num(p, nan=0.0, neginf=0.0, posinf=0.0)
+                q = np.nan_to_num(q, nan=0.0, neginf=0.0, posinf=0.0)
+                p = np.clip(p, 0, None)
+                q = np.clip(q, 0, None)
+                if p.sum() > 0: p /= p.sum()
+                if q.sum() > 0: q /= q.sum()
+                results[vessel][plane] = wasserstein_distance(x, x, p, q)
 
         # Aggregate per metric
         aggregated_metrics[vessel] = float(np.mean([results[vessel][plane] for plane in results[vessel]]))
@@ -132,7 +145,7 @@ def vascular_involvement(annotations: list, vi: np.array, soft_mask:np.array, sm
 Dice Score Evaluation
 '''
 
-def merged_dice_score(pred: np.ndarray, bin_pred: np.ndarray, annotations: list, smooth: float = 1e-6) -> tuple[float, float]:
+def merged_dice_score(pred: np.ndarray, bin_pred: np.ndarray, annotations: list, staple_gt: np.array, smooth: float = 1e-6) -> tuple[float, float]:
     """
     Compute the soft Dice score between a soft prediction and the average of multiple binary annotations.
 
@@ -140,9 +153,13 @@ def merged_dice_score(pred: np.ndarray, bin_pred: np.ndarray, annotations: list,
     ----------
     pred : np.ndarray
         The soft prediction, values in [0, 1], shape (H, W, D) or (N, H, W, D).
+    pred_bin: np.array
+        Binarized prediction.
     annotations : np.ndarray
         Multiple binary annotations, shape (K, H, W, D) or (K, N, H, W, D).
         K is the number of annotators.
+    staple_gt: np.array
+        Binary STAPLE GT generate from all 5 annotations.
     smooth : float
         Smoothing constant to avoid division by zero.
 
@@ -155,8 +172,7 @@ def merged_dice_score(pred: np.ndarray, bin_pred: np.ndarray, annotations: list,
     """
 
     # Average over annotations
-    avg_gt = np.mean(np.stack(annotations, axis=0), axis=0)  # shape: (H, W, D) or (N, H, W, D)
-    bin_gt = avg_gt > 0.5
+    avg_gt = np.mean(np.stack(annotations, axis=0), axis=0)
 
     # Flatten for Dice computation
     pred_flat = pred.reshape(-1)
@@ -180,7 +196,7 @@ def merged_dice_score(pred: np.ndarray, bin_pred: np.ndarray, annotations: list,
             list_dice.append(dice_coefficient(pred_flat_bin, gt_flat_bin))
 
     ### binary dice
-    bin_dice = dice_coefficient(bin_pred, bin_gt)
+    bin_dice = dice_coefficient(bin_pred, staple_gt)
 
     return float(np.mean(list_dice)), float(bin_dice)
     
@@ -403,6 +419,10 @@ def expected_calibration_error(groundtruth: np.array, prob_pred_onehot: np.array
         all_samples_with_bg = all_samples
     else:
         raise ValueError(f"Shape mismatch: prob_pred_onehot has shape {all_samples.shape}, but num_classes is {num_classes}")
+
+    # Normalize predictions to avoid zero-sum errors
+    all_samples_with_bg = torch.clamp(all_samples_with_bg, min=1e-8)  # avoid zero
+    all_samples_with_bg = all_samples_with_bg / all_samples_with_bg.sum(dim=0, keepdim=True)
     
     # Flatten the tensors to (num_samples, num_classes) and (num_samples,)
     all_groundtruth_flat = all_groundtruth.reshape(-1)
