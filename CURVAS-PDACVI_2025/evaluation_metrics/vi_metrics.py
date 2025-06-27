@@ -39,7 +39,7 @@ def get_involvement(tumor: np.array, vessel: np.array, vessel_value: int, image:
             if 1 not in slice_vessel: continue
 
             cropped_slice_tumor, cropped_slice_vessel, _ = crop_slices_together(slice_tumor, slice_vessel)
-            _, _, tumor_contact, vessel_edge = assess_vascular_involvement(cropped_slice_tumor, cropped_slice_vessel, dilation_margin=3)
+            _, tumor_contact, vessel_edge = assess_vascular_involvement(cropped_slice_tumor, cropped_slice_vessel)
 
             degrees = (tumor_contact / np.sum(vessel_edge == 1) * 360) if np.sum(vessel_edge == 1) > 0 else 0
             
@@ -48,7 +48,7 @@ def get_involvement(tumor: np.array, vessel: np.array, vessel_value: int, image:
     return max_degrees
 
 
-def assess_vascular_involvement(lesion_mask, vessel_mask, dilation_margin=1) -> tuple[np.array, int, np.array]:
+def assess_vascular_involvement(lesion_mask, vessel_mask, dilation_margin=None) -> tuple[np.array, int, np.array]:
     """
     Assess direct overlap and proximity-based vessel involvement.
 
@@ -56,10 +56,11 @@ def assess_vascular_involvement(lesion_mask, vessel_mask, dilation_margin=1) -> 
     ----------
         lesion_mask: np.ndarray
             Binary mask with 1 = lesion.
-        vessel_mask: np.ndarray)
+        vessel_mask: np.ndarray
             Binary mask with 1 = vessel.
-        dilation_margin: int
-            Number of pixels to dilate lesion mask.
+        dilation_margin : np.ndarray
+            Structuring element used for the dilation. Non-zero elements are
+            considered True. 
 
     Returns
     -------
@@ -71,7 +72,7 @@ def assess_vascular_involvement(lesion_mask, vessel_mask, dilation_margin=1) -> 
             Binary mask with 1 = vessel edge.
     """
     # Ensure binary
-    lesion_mask = (binary_dilation(lesion_mask, dilation_margin) > 0).astype(np.uint8)    
+    lesion_mask = (binary_dilation(lesion_mask) > 0).astype(np.uint8)    
     vessel_mask = (vessel_mask > 0).astype(np.uint8)
 
     # Perform erosion
